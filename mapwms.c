@@ -3673,6 +3673,27 @@ int msWMSGetMap(mapObj *map, int nVersion, char **names, char **values, int nume
     if (!msIntegerInArray(GET_LAYER(map, i)->index, ows_request->enabled_layers, ows_request->numlayers))
       GET_LAYER(map, i)->status = MS_OFF;
 
+  /*
+   * APEX_IR=<layer>:<APP>:<PAGE>:<REPORT>:<SESSION>
+   */
+  for (i = 0; i < numentries &&
+       strcasecmp (names[i], "APEX_IR") != 0; i ++);
+  if (i < numentries) {
+    int     tok;
+    char ** reportData;
+    reportData = msStringSplit (values[i], ':', &tok);
+    if (tok == 5) {
+      i = msGetLayerIndex (map, reportData[0]);
+      if (i != -1 && GET_LAYER(map, i)->status != MS_OFF &&
+          GET_LAYER(map, i)->connectiontype == MS_ORACLESPATIAL)
+      {
+        GET_LAYER(map, i)->filter.string =
+          msOCIGetApexFilter (GET_LAYER(map, i), reportData[1], reportData[2], reportData[3], reportData[4]);
+      }
+    }
+    msFreeCharArray (reportData, tok);
+  }
+
   if (sldrequested && sldspatialfilter) {
     /* set the quermap style so that only selected features will be retruned */
     map->querymap.status = MS_ON;
@@ -3999,6 +4020,27 @@ int msWMSFeatureInfo(mapObj *map, int nVersion, char **names, char **values, int
   if (wms_layer)
     return msWMSLayerExecuteRequest(map, numOWSLayers, point.x, point.y,
                                     feature_count, info_format, WMS_GETFEATUREINFO);
+
+  /*
+   * APEX_IR=<layer>:<APP>:<PAGE>:<REPORT>:<SESSION>
+   */
+  for (i = 0; i < numentries &&
+       strcasecmp (names[i], "APEX_IR") != 0; i ++);
+  if (i < numentries) {
+    int     tok;
+    char ** reportData;
+    reportData = msStringSplit (values[i], ':', &tok);
+    if (tok == 5) {
+      i = msGetLayerIndex (map, reportData[0]);
+      if (i != -1 && GET_LAYER(map, i)->status != MS_OFF &&
+          GET_LAYER(map, i)->connectiontype == MS_ORACLESPATIAL)
+      {
+        GET_LAYER(map, i)->filter.string =
+          msOCIGetApexFilter (GET_LAYER(map, i), reportData[1], reportData[2], reportData[3], reportData[4]);
+      }
+    }
+    msFreeCharArray (reportData, tok);
+  }
 
   if( use_bbox == MS_FALSE ) {
 

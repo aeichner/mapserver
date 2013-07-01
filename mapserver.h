@@ -2944,4 +2944,5 @@ shapeObj *msGEOSOffsetCurve(shapeObj *p, double offset);
 }
 #endif
 
+char * msOCIGetApexFilter (layerObj*, char*, char*, char*, char*);
 #endif /* MAP_H */

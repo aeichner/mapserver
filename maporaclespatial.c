@@ -3262,6 +3262,310 @@ void msOracleSpatialLayerFreeItemInfo( layerObj *layer )
   /* nothing to do */
 }
 
+char * msOCIGetApexFilter (layerObj *l, char *app, char *page, char *report, char *session)
+{
+  char const * const filter = "SELECT c.condition_operator, " \
+                               "c.condition_expression, " \
+                               "c.condition_expression2, " \
+                               "c.condition_sql " \
+                          "FROM   apex_application_page_ir_cond c " \
+                            "JOIN apex_application_page_ir_rpt r " \
+                            "ON c.report_id = r.report_id " \
+                          "WHERE c.application_id = :app_id_in    AND " \
+                                "c.page_id = :page_id_in          AND " \
+                                "c.condition_type = 'Filter'      AND " \
+                                "c.condition_enabled = 'Yes'      AND " \
+                                "r.base_report_id = :report_id_in AND " \
+                                "r.session_id = :session_id_in";
+  char const * const search =
+  "SELECT r.condition_expression, " \
+         "col.column_type, " \
+         "col.column_alias, " \
+         "r.search_id " \
+    "FROM ( " \
+      "SELECT r.application_id, " \
+             "r.page_id, " \
+             "r.interactive_report_id, " \
+             "ROWNUM AS search_id, " \
+             "c.condition_expression, " \
+             "r.report_columns " \
+        "FROM   apex_application_page_ir_cond c " \
+          "JOIN apex_application_page_ir_rpt r " \
+            "ON c.report_id      = r.report_id      AND " \
+               "c.page_id        = r.page_id        AND " \
+               "c.application_id = r.application_id " \
+        "WHERE c.application_id = :app_id_in    AND " \
+              "c.page_id = :page_id_in          AND " \
+              "c.condition_type = 'Search'      AND " \
+              "c.condition_enabled = 'Yes'      AND " \
+              "r.base_report_id = :report_id_in AND " \
+              "r.session_id = :session_id_in "\
+      ") r "\
+    "JOIN  apex_application_page_ir_col col " \
+      "ON  r.application_id = col.application_id AND " \
+          "r.interactive_report_id = col.interactive_report_id " \
+    "WHERE instr (r.report_columns, ':' || col.column_alias || ':') > 0 AND " \
+          "col.allow_filtering = 'Yes' AND " \
+          "col.column_type IN ('STRING', 'NUMBER') AND " \
+          "col.display_text_as != 'HIDDEN'";
+
+  int success = 1, i;
+  msOracleSpatialLayerInfo *layerinfo = (msOracleSpatialLayerInfo *) l->layerinfo;
+  if (layerinfo == NULL) {
+    if (msOracleSpatialLayerOpen (l) != MS_SUCCESS) {
+      return NULL;
+    }
+    layerinfo = l->layerinfo;
+  }
+  msOracleSpatialHandler     *hand   = (msOracleSpatialHandler *) layerinfo->orahandlers;
+  msOracleSpatialStatement  *sthand  = (msOracleSpatialStatement *) layerinfo->orastmt;
+
+  OCIStmt *stmt = sthand->stmthp;
+  OCIBind *bnd = NULL;
+  OCIDefine * items[4] = {NULL, NULL, NULL, NULL};
+  sthand->items = (item_text_array *)malloc (sizeof (item_text_array) * 4);
+
+  success = TRY(hand, OCIStmtPrepare (stmt, hand->errhp, (text *)filter, (ub4)strlen(filter), (ub4)OCI_NTV_SYNTAX, (ub4)OCI_DEFAULT));
+
+  success = TRY(hand, OCIBindByName (stmt, &bnd, hand->errhp, (text *) ":page_id_in", -1, (ub1 *)page, strlen(page)+1, SQLT_STR,
+                                  (dvoid *) 0, (ub2 *) 0, (ub2) 0, (ub4) 0, (ub4 *) 0, OCI_DEFAULT)) &&
+            TRY(hand, OCIBindByName (stmt, &bnd, hand->errhp, (text *) ":app_id_in", -1, (ub1 *)app, strlen(app)+1, SQLT_STR,
+                                  (dvoid *) 0, (ub2 *) 0, (ub2) 0, (ub4) 0, (ub4 *) 0, OCI_DEFAULT)) &&
+            TRY(hand, OCIBindByName (stmt, &bnd, hand->errhp, (text *) ":report_id_in", -1, (ub1 *)report, strlen(report)+1, SQLT_STR,
+                                  (dvoid *) 0, (ub2 *) 0, (ub2) 0, (ub4) 0, (ub4 *) 0, OCI_DEFAULT)) &&
+            TRY(hand, OCIBindByName (stmt, &bnd, hand->errhp, (text *) ":session_id_in", -1, (ub1 *)session, strlen(session)+1, SQLT_STR,
+                                  (dvoid *) 0, (ub2 *) 0, (ub2) 0, (ub4) 0, (ub4 *) 0, OCI_DEFAULT));
+
+  for (i = 0; i < 4 && success; i ++) {
+    success = TRY(hand, OCIDefineByPos (stmt, &items[i], hand->errhp, (ub4)i+1, (dvoid *)sthand->items[i], (sb4)TEXT_SIZE, SQLT_STR, (dvoid *)0, (ub2 *)0, (ub2 *)0, (ub4)OCI_DEFAULT));
+  }
+
+  success = TRY(hand, OCIStmtExecute (hand->svchp, stmt, hand->errhp, (ub4)1, (ub4)0, (OCISnapshot *)NULL, (OCISnapshot *)NULL, (ub4)OCI_DEFAULT)) &&
+            TRY(hand, OCIAttrGet (stmt, (ub4)OCI_HTYPE_STMT, (dvoid *)&sthand->rows_fetched, (ub4 *)0, (ub4)OCI_ATTR_ROWS_FETCHED, hand->errhp)) &&
+            TRY(hand, OCIAttrGet (stmt, (ub4)OCI_HTYPE_STMT, (dvoid *)&sthand->rows_count, (ub4 *)0, (ub4)OCI_ATTR_ROW_COUNT, hand->errhp));
+
+  char * flt = malloc (32);
+  int    flt_sz  = 32;
+  int    flt_len = 0;
+
+  while (success) {
+    for (i = 0; i < sthand->rows_fetched; i++) {
+      if (flt_len > 0) {
+        flt_sz += 5;
+        flt = realloc (flt, flt_sz);
+        strcpy (flt + flt_len, " and ");
+        flt_len += 5;
+      }
+      char * expr;
+      char * append;
+      size_t len;
+      char * src = (char*)sthand->items[3][i]; // condition_sql
+      int     ntokens = 0;
+      char ** tokens = NULL;
+
+      /**
+       * 'in' und 'not in' Operatoren werden separat behandelt, da hier der
+       * Quellausdruck zunächst in die einzelnen Listenbestandteile zerlegt
+       * wird.
+       */
+      if (strcasecmp ((char*)sthand->items[0][i],     "in") == 0 ||
+          strcasecmp ((char*)sthand->items[0][i], "not in") == 0)
+      {
+         tokens = msStringSplit ((char*)sthand->items[1][i], ',', &ntokens);
+      }
+
+      while ((expr = strchr (src, '#')) != NULL) {
+        len = expr - src;
+        flt_sz += len;
+        flt = realloc (flt, flt_sz);
+        strncpy (flt + flt_len, src, len);
+        flt_len += len;
+
+        if (tokens) {
+          /**
+           * für die Operatoren "in" und "not in"; diese verwenden andere Platzhalter
+           */
+          if (strncmp (expr, "#APXWS_EXPR_VAL", strlen ("#APXWS_EXPR_VAL")) == 0) {
+            int idx = atoi (expr + strlen ("#APXWS_EXPR_VAL"));
+            if (idx > 0 && idx <= ntokens)
+              append = tokens[idx - 1];
+            else
+              append = "";
+            src = expr + strlen ("#APXWS_EXPR_VAL");
+            src = strchr (src, '#')? strchr (src, '#') + 1: strchr (src, '\0');
+          } else {
+            append = "#";
+            src = expr + 1;
+          }
+        } else {
+          /**
+           * für alle anderen ist sind nur APXWS_EXPR{,2} zulässig
+           */
+          if (strncmp (expr, "#APXWS_EXPR#", strlen ("#APXWS_EXPR#")) == 0) {
+            append = (char*)sthand->items[1][i];
+            src = expr + strlen ("#APXWS_EXPR#");
+          } else
+          if (strncmp (expr, "#APXWS_EXPR2#", strlen ("#APXWS_EXPR2#")) == 0) {
+            append = (char*)sthand->items[2][i];
+            src = expr + strlen ("#APXWS_EXPR2#");
+          } else {
+            append = "#";
+            src = expr + 1;
+          }
+        }
+
+        // copy and escape the string
+        len = strlen (append) + 2;
+        { char * s; for (s = append; *s != '\0'; s++)  len += (*s == '\''); }
+        flt_sz += len;
+        flt = realloc (flt, flt_sz);
+        { char * src = append;
+          char * dst = flt + flt_len;
+          *(dst ++) = '\'';
+          while (*src) {
+            if (*src == '\'') *(dst ++) = '\'';
+            *(dst ++) = *(src ++);
+          }
+          *(dst ++) = '\'';
+        }
+        flt_len += len;
+      }
+
+      len = strlen (src);
+      flt_sz += len;
+      flt = realloc (flt, flt_sz);
+      strcpy (flt + flt_len, src);
+      flt_len += len;
+
+      if (tokens) {
+        msFreeCharArray (tokens, ntokens);
+        tokens = NULL;
+      }
+    }
+    success = TRY(hand, OCIStmtFetch2(stmt, hand->errhp, 1, (ub2)OCI_FETCH_NEXT, (sb4)0, (ub4)OCI_DEFAULT)) &&
+              TRY(hand, OCIAttrGet (stmt, (ub4)OCI_HTYPE_STMT, (dvoid *)&sthand->rows_fetched, (ub4 *)0, (ub4)OCI_ATTR_ROWS_FETCHED, hand->errhp)) &&
+              TRY(hand, OCIAttrGet (stmt, (ub4)OCI_HTYPE_STMT, (dvoid *)&sthand->rows_count, (ub4 *)0, (ub4)OCI_ATTR_ROW_COUNT, hand->errhp));
+  }
+
+  /**
+   * Behandlung der Such-Wörter. Das SQL-Statement selektiert eine Liste aus Suchwort und -spalte.
+   * Alle zum gleichen Suchwort gehörenden Ausdrücke werden in einem OR gruppiert.
+   * Alle Gruppen aus Suchwörtern werden per AND an die restliche Filterliste angebunden.
+   */
+  hand->last_oci_status = OCI_SUCCESS;
+  success = TRY(hand, OCIStmtPrepare (stmt, hand->errhp, (text *)search, (ub4)strlen(search), (ub4)OCI_NTV_SYNTAX, (ub4)OCI_DEFAULT));
+
+  success = TRY(hand, OCIBindByName (stmt, &bnd, hand->errhp, (text *) ":page_id_in", -1, (ub1 *)page, strlen(page)+1, SQLT_STR,
+                                  (dvoid *) 0, (ub2 *) 0, (ub2) 0, (ub4) 0, (ub4 *) 0, OCI_DEFAULT)) &&
+            TRY(hand, OCIBindByName (stmt, &bnd, hand->errhp, (text *) ":app_id_in", -1, (ub1 *)app, strlen(app)+1, SQLT_STR,
+                                  (dvoid *) 0, (ub2 *) 0, (ub2) 0, (ub4) 0, (ub4 *) 0, OCI_DEFAULT)) &&
+            TRY(hand, OCIBindByName (stmt, &bnd, hand->errhp, (text *) ":report_id_in", -1, (ub1 *)report, strlen(report)+1, SQLT_STR,
+                                  (dvoid *) 0, (ub2 *) 0, (ub2) 0, (ub4) 0, (ub4 *) 0, OCI_DEFAULT)) &&
+            TRY(hand, OCIBindByName (stmt, &bnd, hand->errhp, (text *) ":session_id_in", -1, (ub1 *)session, strlen(session)+1, SQLT_STR,
+                                  (dvoid *) 0, (ub2 *) 0, (ub2) 0, (ub4) 0, (ub4 *) 0, OCI_DEFAULT));
+  for (i = 0; i < 4 && success; i ++) {
+    success = TRY(hand, OCIDefineByPos (stmt, &items[i], hand->errhp, (ub4)i+1, (dvoid *)sthand->items[i], (sb4)TEXT_SIZE, SQLT_STR, (dvoid *)0, (ub2 *)0, (ub2 *)0, (ub4)OCI_DEFAULT));
+  }
+
+  success = TRY(hand, OCIStmtExecute (hand->svchp, stmt, hand->errhp, (ub4)5, (ub4)0, (OCISnapshot *)NULL, (OCISnapshot *)NULL, (ub4)OCI_DEFAULT)) &&
+            TRY(hand, OCIAttrGet (stmt, (ub4)OCI_HTYPE_STMT, (dvoid *)&sthand->rows_fetched, (ub4 *)0, (ub4)OCI_ATTR_ROWS_FETCHED, hand->errhp)) &&
+            TRY(hand, OCIAttrGet (stmt, (ub4)OCI_HTYPE_STMT, (dvoid *)&sthand->rows_count, (ub4 *)0, (ub4)OCI_ATTR_ROW_COUNT, hand->errhp));
+
+  int last_id = atoi ((char*)sthand->items[3][0]);
+  int first = 1;
+  int at_least_one = 0;
+  int len;
+  int wrote = 0;
+
+  while (success) {
+    for (i = 0; i < sthand->rows_fetched;) {
+      at_least_one = 1;
+      if (first) {
+        len = (flt_len > 0)? strlen(" and ("): strlen("(");
+        flt_sz += len;
+        flt = realloc (flt, flt_sz);
+        strcpy (flt + flt_len, (flt_len > 0)? " and (": "(");
+        flt_len += len;
+      }
+
+      while (i < sthand->rows_fetched &&
+             last_id == atoi ((char*)sthand->items[3][i]))
+      {
+        len = (first? 0: strlen (" or ")) +
+              strlen ("instr (upper (), upper ('')) > 0") +
+              strlen ((char*)sthand->items[2][i]) +
+              strlen ((char*)sthand->items[0][i]);
+        { char * s;
+          for (s = (char*)sthand->items[2][i]; *s != '\0'; s++)  len += (*s == '\'');
+          for (s = (char*)sthand->items[0][i]; *s != '\0'; s++)  len += (*s == '\'');
+        }
+        flt_sz += len;
+        flt = realloc (flt, flt_sz);
+
+        wrote = sprintf (flt + flt_len, "%sinstr (upper (", first? "": " or ");
+        flt_len += (wrote > 0)? wrote: 0;
+
+        { char * src = (char*)sthand->items[2][i];
+          char * dst = flt + flt_len;
+          while (*src) {
+            if (*src == '\'') *(dst ++) = '\'';
+            *(dst ++) = *(src ++);
+          }
+          flt_len = dst - flt;
+        }
+
+        wrote = sprintf (flt + flt_len, "), upper ('");
+        flt_len += (wrote > 0)? wrote: 0;
+
+        { char * src = (char*)sthand->items[0][i];
+          char * dst = flt + flt_len;
+          while (*src) {
+            if (*src == '\'') *(dst ++) = '\'';
+            *(dst ++) = *(src ++);
+          }
+          flt_len = dst - flt;
+        }
+
+        wrote = sprintf (flt + flt_len, "')) > 0");
+        flt_len += (wrote > 0)? wrote: 0;
+
+        first = 0;
+        i ++;
+      }
+
+      if (i < sthand->rows_fetched &&
+          last_id != atoi ((char*)sthand->items[3][i]))
+      {
+        last_id = atoi ((char*)sthand->items[3][i]);
+        first = 1;
+        flt_sz += 1;
+        flt = realloc (flt, flt_sz);
+        strcpy (flt + flt_len, ")");
+        flt_len += 1;
+      }
+    }
+    success = TRY(hand, OCIStmtFetch2(stmt, hand->errhp, 5, (ub2)OCI_FETCH_NEXT, (sb4)0, (ub4)OCI_DEFAULT)) &&
+              TRY(hand, OCIAttrGet (stmt, (ub4)OCI_HTYPE_STMT, (dvoid *)&sthand->rows_fetched, (ub4 *)0, (ub4)OCI_ATTR_ROWS_FETCHED, hand->errhp)) &&
+              TRY(hand, OCIAttrGet (stmt, (ub4)OCI_HTYPE_STMT, (dvoid *)&sthand->rows_count, (ub4 *)0, (ub4)OCI_ATTR_ROW_COUNT, hand->errhp));
+  }
+  if (at_least_one) {
+    flt_sz += 1;
+    flt = realloc (flt, flt_sz);
+    strcpy (flt + flt_len, ")");
+    flt_len += 1;
+  }
+
+  if (flt && flt_len == 0) {
+    free (flt);
+    flt = NULL;
+  }
+
+  free (sthand->items); sthand->items = NULL;
+  sthand->row = sthand->row_num = 0;
+  hand->last_oci_status = OCI_SUCCESS;
+  return flt;
+}
+
 int msOracleSpatialLayerGetAutoStyle( mapObj *map, layerObj *layer, classObj *c, shapeObj *shape )
 {
   msSetError( MS_ORACLESPATIALERR, "Function not implemented yet", "msLayerGetAutoStyle()" );
