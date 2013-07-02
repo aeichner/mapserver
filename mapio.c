@@ -37,7 +37,7 @@
 #include <io.h>
 #endif
 
-#ifdef MOD_WMS_ENABLED
+#ifdef USE_APACHE_MODULE
 #  include "httpd.h"
 #  include "apr_strings.h"
 #endif
@@ -177,7 +177,7 @@ void msIO_setHeader (const char *header, const char* value, ...)
 {
   va_list args;
   va_start( args, value );
-#ifdef MOD_WMS_ENABLED
+#ifdef USE_APACHE_MODULE
   msIOContext *ioctx = msIO_getHandler (stdout);
   if(ioctx && !strcmp(ioctx->label,"apache")) {
 
@@ -193,22 +193,21 @@ void msIO_setHeader (const char *header, const char* value, ...)
                       fullvalue
                      );
     }
-  } else {
-#endif // MOD_WMS_ENABLED
+  } else
+#endif // USE_APACHE_MODULE
+  {
     msIO_fprintf(stdout,"%s: ",header);
     msIO_vfprintf(stdout,value,args);
     msIO_fprintf(stdout,"\r\n");
-#ifdef MOD_WMS_ENABLED
   }
-#endif
 }
 
 void msIO_sendHeaders ()
 {
-#ifdef MOD_WMS_ENABLED
+#ifdef USE_APACHE_MODULE
   msIOContext *ioctx = msIO_getHandler (stdout);
   if(ioctx && !strcmp(ioctx->label,"apache")) return;
-#endif // !MOD_WMS_ENABLED
+#endif // USE_APACHE_MODULE
   msIO_printf ("\r\n");
   fflush (stdout);
 }

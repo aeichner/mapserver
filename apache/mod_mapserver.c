@@ -245,8 +245,31 @@ mapserver_handler (request_rec *r)
          &mapserver_module);
 
   /* decline the request if there's no map configured */
-  if (!conf || !conf->map)
+  if (!conf || !conf->map || !conf->uri ||
+      strncmp(conf->uri, r->uri, strlen(conf->uri)) != 0)
     return DECLINED;
+
+  /* make a copy of the URI so we can modify it safely */
+  char *uri          = apr_pstrdup (r->pool, r->uri);
+  int   len          = strlen (uri);
+  int   conf_uri_len = strlen (conf->uri);
+  char *enforce_service = NULL;
+
+  /* If the URI points to a subdirectory we want to decline.
+   */
+  if (len > conf_uri_len) {
+    char *path_info = uri + conf_uri_len + 1;
+    char *path_segment_end = path_info;
+
+    while (*path_segment_end != '\0' && *path_segment_end != '/')
+      path_segment_end++;
+
+    if (*path_segment_end != '\0')  // more than one segment
+      return DECLINED;
+
+    enforce_service = (strlen(path_info) > 0)?
+      apr_pstrndup(r->pool, path_info, path_segment_end - path_info): NULL;
+  }
 
   apr_finfo_t mapstat;
   if (apr_stat (&mapstat, conf->mapfile_name, APR_FINFO_MTIME, r->pool) == APR_SUCCESS) {
@@ -265,16 +288,6 @@ mapserver_handler (request_rec *r)
     ap_log_error (APLOG_MARK, APLOG_WARNING, 0, NULL,
                   "%s: unable to stat file %s", __func__, conf->mapfile_name);
   }
-
-  /* make a copy of the URI so we can modify it safely */
-  char *uri          = apr_pstrdup (r->pool, r->uri);
-  int   len          = strlen (uri);
-  int   conf_uri_len = strlen (conf->uri);
-
-  /* If the URI points to a subdirectory we want to decline.
-   */
-  if (len > conf_uri_len)
-    return DECLINED;
 
   int    argc          = 0;
   char **ParamNames    = NULL;
@@ -303,6 +316,23 @@ mapserver_handler (request_rec *r)
   if (!argc && !post_data)
     return HTTP_BAD_REQUEST;
 
+  if (enforce_service) {
+    int i;
+    for (i = 0; i < argc && strcasecmp(ParamNames[i], "SERVICE") != 0; i++) ;
+    if (i < argc) {
+      // if the SERVICE parameter was found, set it to <SERVICE>
+      ParamValues[i] = enforce_service;
+    } else if (argc < WMS_MAX_ARGS - 1) {
+      // SERVICE is currently not set, append it now
+      argc++;
+      ParamNames[argc - 1] = apr_pstrdup(r->pool, "SERVICE");
+      ParamValues[argc - 1] = enforce_service;
+    } else {
+      // maximum number of arguments already reached
+      return HTTP_BAD_REQUEST;
+    }
+  }
+
   /* Now we install the IO redirection.
   */
   if (msIO_installApacheRedirect (r) != MS_TRUE)
@@ -319,7 +349,9 @@ mapserver_handler (request_rec *r)
   mapserv->request->contenttype = szContentType;
 
   //mapserv->map = msModuleLoadMap(mapserv,conf);
-  mapserv->map = conf->map;
+  mapserv->map = msNewMapObj();
+  msCopyMap(mapserv->map, conf->map);
+
   if(!mapserv->map) {
     msCGIWriteError(mapserv);
     goto end_request;
@@ -338,6 +370,7 @@ end_request:
     mapserv->request->ParamValues = NULL;
     mapserv->request->postrequest = NULL;
     mapserv->request->contenttype = NULL;
+    msFreeMap(mapserv->map);
     mapserv->map = NULL;
     msFreeMapServObj(mapserv);
   }
