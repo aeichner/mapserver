@@ -1728,36 +1728,23 @@ int msWFSGetFeature(mapObj *map, wfsParamsObj *paramsObj, cgiRequestObj *req, ow
                 papszPropertyName = (char **)msSmallMalloc(sizeof(char *)*nPropertyNames);
                 for (i=0; i<nPropertyNames; i++) {
                   if (strlen(tokens[i]) > 0) {
-                    /*trim namespaces. PROPERTYNAME=(ns:prop1,ns:prop2)(prop1)*/
-                    if (strstr(tokens[i], ":")) {
-                      char **tokens1, **tokens2;
-                      int n1=0,n2=0,l=0;
-                      char *pszTmp = NULL;
-
-                      tokens1 = msStringSplit(tokens[i], ',', &n1);
-                      for (l=0; l<n1; l++) {
-                        if (pszTmp!=NULL)
-                          pszTmp = msStringConcatenate(pszTmp,",");
-
-                        if (strstr(tokens1[l],":")) {
-                          tokens2 = msStringSplit(tokens1[l], ':', &n2);
-                          if (tokens2 && n2==2)
-                            pszTmp = msStringConcatenate(pszTmp, tokens2[1]);
-                          else
-                            pszTmp = msStringConcatenate(pszTmp,tokens1[l]);
-                          if (tokens2 && n2>0)
-                            msFreeCharArray(tokens2, n2);
-                        } else
-                          pszTmp = msStringConcatenate(pszTmp,tokens1[l]);
+                    /* clean up the property list here
+                     * strip any path segment and namespace prefix, i.e.
+                     * (ns:typename/ns:prop1,ns:prop2) becomes simply (prop1,prop2)
+                     */
+                    char *tok, *last, *clean;
+                    clean = tokens[i];
+                    for (last = tok = clean; *tok != ')'; tok ++) {
+                      if (*tok == '/' || *tok == ':') {
+                        last = ++tok; continue;
+                      } else if (*tok == ',') {
+                        while (last != tok + 1)
+                          *(clean ++) = *(last ++);
+                        }
                       }
-                      papszPropertyName[i] = msStrdup(pszTmp);
-                      msFree(pszTmp);
-                      if (tokens1 && n1>0)
-                        msFreeCharArray(tokens1, n1);
-                    } else
+                      *tok = '\0';
+                      strcpy (clean, last);
                       papszPropertyName[i] = msStrdup(tokens[i]);
-                    /* remove trailing ) */
-                    papszPropertyName[i][strlen(papszPropertyName[i])-1] = '\0';
                   } else
                     papszPropertyName[i] = NULL; /*should return an error*/
                 }
