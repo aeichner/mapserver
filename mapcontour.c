@@ -415,7 +415,7 @@ static int msContourLayerReadRaster(layerObj *layer, rectObj rect)
   CPLPrintPointer(pointer, clinfo->buffer, sizeof(pointer));
   sprintf(memDSPointer,"MEM:::DATAPOINTER=%s,PIXELS=%d,LINES=%d,BANDS=1,DATATYPE=Float64",
           pointer, dst_xsize, dst_ysize);
-  clinfo->hDS = GDALOpen(memDSPointer, GF_Read);
+  clinfo->hDS = GDALOpen(memDSPointer,  GA_ReadOnly);
   if (clinfo->hDS == NULL) {
     msSetError(MS_IMGERR,
                "Unable to open GDAL Memory dataset.",
@@ -462,6 +462,9 @@ static char* msContourGetOption(layerObj *layer, const char *name)
   
   options = CSLFetchNameValueMultiple(layer->processing, name);
   c = CSLCount(options);
+
+  /* First pass to find the value among options that have min/maxscaledenom */
+  /* specified */
   for (i=0; i<c && found == MS_FALSE; ++i) {
     values = CSLTokenizeStringComplex(options[i], ":", FALSE, FALSE);
     if (CSLCount(values) == 2) {
@@ -477,6 +480,17 @@ static char* msContourGetOption(layerObj *layer, const char *name)
         }
       }
       CSLDestroy(tmp);
+    }
+    CSLDestroy(values);
+  }
+  
+  /* Second pass to find the value among options that do NOT have */
+  /* min/maxscaledenom specified */
+  for (i=0; i<c && found == MS_FALSE; ++i) {
+    values = CSLTokenizeStringComplex(options[i], ":", FALSE, FALSE);
+    if (CSLCount(values) == 1) {
+      value = msStrdup(values[0]);
+      found = MS_TRUE;
     }
     CSLDestroy(values);
   }
@@ -584,6 +598,12 @@ static int msContourLayerGenerateContour(layerObj *layer)
                                                     elevItem ),
                               NULL, NULL );
 
+  if (eErr != CE_None) {
+    msSetError( MS_IOERR, "GDALContourGenerate() failed: %s",
+                "msContourLayerGenerateContour()", CPLGetLastErrorMsg() );
+    return MS_FAILURE;
+  }
+  
   msConnPoolRegister(&clinfo->ogrLayer, clinfo->hOGRDS, msContourOGRCloseConnection);
 
   return MS_SUCCESS;

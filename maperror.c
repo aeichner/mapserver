@@ -85,7 +85,6 @@ static char *ms_errorCodes[MS_NUMERRORCODES] = {"",
     "OpenGL renderer error.",
     "Renderer error."
                                                };
-
 #ifndef USE_THREAD
 
 errorObj *msGetErrorObj()
@@ -529,8 +528,13 @@ char *msGetVersion()
 #ifdef USE_CAIRO
   strcat(version, " SUPPORTS=CAIRO");
 #endif
-#ifdef USE_SVG_CAIRO
+#if defined(USE_SVG_CAIRO) || defined(USE_RSVG)
   strcat(version, " SUPPORTS=SVG_SYMBOLS");
+  #ifdef USE_SVG_CAIRO
+    strcat(version, " SUPPORTS=SVGCAIRO");
+  #else
+    strcat(version, " SUPPORTS=RSVG");
+  #endif
 #endif
 #ifdef USE_OGL
   strcat(version, " SUPPORTS=OPENGL");
