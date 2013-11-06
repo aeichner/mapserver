@@ -695,7 +695,7 @@ int msShapeGetAnnotation(layerObj *layer, shapeObj *shape)
         continue; /* next label */
       }
     }
-    if(msEvalExpression(layer, shape, &(lbl->expression), -1) != MS_TRUE) {
+    if(msEvalExpression(layer, shape, &(lbl->expression), layer->labelitemindex) != MS_TRUE) {
       lbl->status = MS_OFF;
       continue; /* next label */
     }
@@ -1845,9 +1845,9 @@ shapeObj *msOffsetPolyline(shapeObj *p, double offsetx, double offsety)
 {
   int i, j;
   shapeObj *ret;
-  if(offsety == -99) { /* complex calculations */
+  if(offsety == MS_STYLE_SINGLE_SIDED_OFFSET) { /* complex calculations */
     return msOffsetCurve(p,offsetx);
-  } else if(offsety == -999) {
+  } else if(offsety == MS_STYLE_DOUBLE_SIDED_OFFSET) {
     shapeObj *tmp1;
     ret = msOffsetCurve(p,offsetx/2.0);
     tmp1 = msOffsetCurve(p, -offsetx/2.0);

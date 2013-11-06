@@ -944,6 +944,10 @@ extern "C" {
 #endif
   };
 
+#define MS_STYLE_SINGLE_SIDED_OFFSET -99
+#define MS_STYLE_DOUBLE_SIDED_OFFSET -999
+#define IS_PARALLEL_OFFSET(offsety) ((offsety) == MS_STYLE_SINGLE_SIDED_OFFSET || (offsety) == MS_STYLE_DOUBLE_SIDED_OFFSET)
+
 
 
   /********************************************************************/
@@ -1056,6 +1060,11 @@ extern "C" {
 
     labelLeaderObj leader;
   };
+
+#define MS_LABEL_PERPENDICULAR_OFFSET -99
+#define MS_LABEL_PERPENDICULAR_TOP_OFFSET 99
+#define IS_PERPENDICULAR_OFFSET(offsety) ((offsety) == MS_LABEL_PERPENDICULAR_OFFSET || (offsety) == MS_LABEL_PERPENDICULAR_TOP_OFFSET)
+
 
   /************************************************************************/
   /*                               classObj                               */

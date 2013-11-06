@@ -2,17 +2,23 @@ cmake_minimum_required (VERSION 2.6)
 
 project (MapServer)
 
+if("${PROJECT_SOURCE_DIR}" STREQUAL "${PROJECT_BINARY_DIR}")
+      message(FATAL_ERROR "In-source builds are not permitted. Make a separate folder for building:
+   mkdir build; cd build; cmake ..
+Before that, remove the files created by this failed run:
+   rm -rf CMakeCache.txt CMakeFiles")
+endif("${PROJECT_SOURCE_DIR}" STREQUAL "${PROJECT_BINARY_DIR}")
+
 include(CheckLibraryExists)
 include(CheckFunctionExists)
 include(CheckIncludeFile)
 include(CheckCSourceCompiles)
 
 
-
 set (MapServer_VERSION_MAJOR 6)
 set (MapServer_VERSION_MINOR 4)
 set (MapServer_VERSION_REVISION 0)
-set (MapServer_VERSION_SUFFIX "-beta1")
+set (MapServer_VERSION_SUFFIX "")
 
 set(TARGET_VERSION_MAJOR ${MapServer_VERSION_MAJOR})
 set(TARGET_VERSION_MINOR ${MapServer_VERSION_MINOR})
@@ -111,7 +117,7 @@ option(WITH_CURL "Enable Curl HTTP support (required for wms/wfs client, and rem
 option(WITH_WFS "Enable WFS Server support (requires PROJ and OGR support)" ON)
 option(WITH_WCS "Enable WCS Server support (requires PROJ and GDAL support)" ON)
 option(WITH_LIBXML2 "Choose if libxml2 support should be built in (used for sos, wcs 1.1,2.0 and wfs 1.1)" ON)
-option(WITH_THREADS "Choose if a thread-safe version of libmapserver should be built (only recommended for some mapscripts)" OFF)
+option(WITH_THREAD_SAFETY "Choose if a thread-safe version of libmapserver should be built (only recommended for some mapscripts)" OFF)
 option(WITH_GIF "Enable GIF support (for PIXMAP loading)" ON)
 option(WITH_PYTHON "Enable Python mapscript support" OFF)
 option(WITH_PHP "Enable Python mapscript support" OFF)
@@ -142,7 +148,33 @@ if(CMAKE_COMPILER_IS_GNUCXX)
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wdeclaration-after-statement")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall")
 endif()
-SET(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib")
+
+if(NOT DEFINED CMAKE_INSTALL_LIBDIR)
+  set(_LIBDIR_DEFAULT "lib")
+  # Override this default 'lib' with 'lib64' iff:
+  #  - we are on Linux system but NOT cross-compiling
+  #  - we are NOT on debian
+  #  - we are on a 64 bits system
+  # reason is: amd64 ABI: http://www.x86-64.org/documentation/abi.pdf
+  # Note that the future of multi-arch handling may be even
+  # more complicated than that: http://wiki.debian.org/Multiarch
+  if(CMAKE_SYSTEM_NAME MATCHES "Linux"
+      AND NOT CMAKE_CROSSCOMPILING
+      AND NOT EXISTS "/etc/debian_version")
+    if(NOT DEFINED CMAKE_SIZEOF_VOID_P)
+      message(AUTHOR_WARNING
+        "Unable to determine default CMAKE_INSTALL_LIBDIR directory because no target architecture is known. "
+        "Please enable at least one language before including GNUInstallDirs.")
+    else()
+      if("${CMAKE_SIZEOF_VOID_P}" EQUAL "8")
+        set(_LIBDIR_DEFAULT "lib64")
+      endif()
+    endif()
+  endif()
+  set(CMAKE_INSTALL_LIBDIR "${_LIBDIR_DEFAULT}" CACHE PATH "object code libraries (${_LIBDIR_DEFAULT})")
+endif()
+
+SET(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}")
 SET(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 SET(CMAKE_MACOSX_RPATH ON)
 
@@ -236,6 +268,8 @@ add_executable(msencrypt msencrypt.c)
 target_link_libraries(msencrypt ${MAPSERVER_LIBMAPSERVER})
 add_executable(tile4ms tile4ms.c)
 target_link_libraries(tile4ms ${MAPSERVER_LIBMAPSERVER})
+add_executable(shptreetst shptreetst.c)
+target_link_libraries(shptreetst ${MAPSERVER_LIBMAPSERVER})
 
 
 find_package(PNG)
@@ -663,14 +697,14 @@ if(WITH_KML)
   endif(USE_LIBXML2)
 endif(WITH_KML)
 
-if(WITH_THREADS)
+if(WITH_THREAD_SAFETY)
   set( CMAKE_THREAD_PREFER_PTHREAD 1 )
   find_package(Threads)
   if (THREADS_FOUND)
     ms_link_libraries( ${CMAKE_THREAD_LIBS_INIT})
     set(USE_THREAD 1)
   endif (THREADS_FOUND)
-endif(WITH_THREADS)
+endif(WITH_THREAD_SAFETY)
 
 if(WITH_XMLMAPFILE)
    if(NOT USE_LIBXML2)
@@ -872,6 +906,7 @@ status_optional_feature("Apache Module (Experimental)" "${USE_APACHE_MODULE}")
 
 message(STATUS "")
 message(STATUS "Will install files to ${CMAKE_INSTALL_PREFIX}")
+message(STATUS "Will install libraries to ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}")
 
 
 include_directories("${PROJECT_BINARY_DIR}")
@@ -884,23 +919,23 @@ endif(WIN32)
 
 #INSTALL(FILES mapserver-api.h ${PROJECT_BINARY_DIR}/mapserver-version.h DESTINATION include)
 if(USE_ORACLE_PLUGIN)
-   INSTALL(TARGETS msplugin_oracle DESTINATION lib)
+   INSTALL(TARGETS msplugin_oracle DESTINATION ${CMAKE_INSTALL_LIBDIR})
 endif(USE_ORACLE_PLUGIN)
 
 if(USE_MSSQL2008)
-   INSTALL(TARGETS msplugin_mssql2008 DESTINATION lib)
+   INSTALL(TARGETS msplugin_mssql2008 DESTINATION ${CMAKE_INSTALL_LIBDIR})
 endif(USE_MSSQL2008)
 
 if(USE_SDE91)
-   INSTALL(TARGETS msplugin_sde91 DESTINATION lib)
+   INSTALL(TARGETS msplugin_sde91 DESTINATION ${CMAKE_INSTALL_LIBDIR})
 endif(USE_SDE91)
 
 if(USE_SDE92)
-   INSTALL(TARGETS msplugin_sde92 DESTINATION lib)
+   INSTALL(TARGETS msplugin_sde92 DESTINATION ${CMAKE_INSTALL_LIBDIR})
 endif(USE_SDE92)
 
-INSTALL(TARGETS sortshp shptree shptreevis msencrypt tile4ms shp2img mapserv mapserver RUNTIME DESTINATION bin LIBRARY DESTINATION lib)
+INSTALL(TARGETS sortshp shptree shptreevis msencrypt legend scalebar tile4ms shptreetst shp2img mapserv mapserver RUNTIME DESTINATION bin LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
 if(BUILD_STATIC)
-   INSTALL(TARGETS mapserver_static DESTINATION lib)
+   INSTALL(TARGETS mapserver_static DESTINATION ${CMAKE_INSTALL_LIBDIR})
 endif(BUILD_STATIC)
 
